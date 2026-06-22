@@ -19,13 +19,6 @@
       "description": "DeepSeek 大模型，使用 Anthropic 兼容接口",
       "envVars": "ANTHROPIC_BASE_URL=\"https://api.deepseek.com/anthropic\"\nANTHROPIC_AUTH_TOKEN=sk-请替换为你的DeepSeek API Key\nANTHROPIC_MODEL=\"deepseek-v4-pro\"",
       "scope": "provider:claude"
-    },
-    {
-      "id": "snippet-glm",
-      "name": "智谱GLM（via 百炼）",
-      "description": "智谱GLM模型，通过阿里云百炼的Anthropic兼容接口",
-      "envVars": "ANTHROPIC_BASE_URL=\"https://dashscope.aliyuncs.com/apps/anthropic\"\nANTHROPIC_API_KEY=sk-请替换为你的百炼API Key\nANTHROPIC_MODEL=\"glm-5.2\"",
-      "scope": "provider:claude"
     }
   ],
   "customContextLimits": {},
