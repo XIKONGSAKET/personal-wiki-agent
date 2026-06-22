@@ -214,20 +214,33 @@ MyWiki/
 **① 搜集资料**
 找到一篇好文章或 PDF，保存到 raw/unprocessed/ 文件夹。可以拖拽、复制粘贴，怎么方便怎么来。
 
-**② 让 AI 处理**
-在 Obsidian 中打开 Claudian 聊天窗口，告诉 AI：
-> "帮我处理 raw/unprocessed/ 里的新资料"
+**② 让 AI 处理（ingest）**
+在 Obsidian 中打开 Claudian 聊天窗口，输入以下命令之一：
 
-AI 会自动读取、总结、提炼，并把结果写入 wiki/ 目录。
+> /ingest_raw — 处理 raw/unprocessed/ 的新资料
+> /ingest_raw 文件名 — 处理指定文件
+> /ingest_raw --batch — 批量处理多篇素材
 
-**③ 审核确认**
-AI 处理完后会请你确认。你需要在聊天窗口回复"确认"或"没问题"，AI 才会把原始资料从 unprocessed/ 移到 processed/。
+AI 会自动读取、总结、提炼，并把结果写入 wiki/ 目录，然后将文件标记为待确认（pending_review）。
 
-**④ 提问**
-当你需要找某个知识时，直接问 AI：
-> "关于 XX 这个概念，wiki 里都记录了哪些信息？"
+**③ 审核确认（approve）**
+AI 处理完后会请你确认。在聊天窗口输入：
 
-AI 会基于已有的 wiki 综合回答。
+> /approve_ingest — 确认本次处理，将原始资料从 unprocessed/ 移到 processed/
+
+确认后，文件才会正式归档。你也可以在确认时提出修改意见。
+
+**④ 提问（query）**
+当你需要找某个知识时，使用 query 命令：
+
+> /query_wiki 你的问题
+
+AI 会基于已有的 wiki 综合回答，并在回答中引用相关来源。
+
+**⑤ 健康检查（lint）**
+定期检查 wiki 的健康状态：
+
+> /lint_wiki — 检查孤立页面、缺失来源、陈旧结论等
 
 ### 几条红线（千万别做）
 
