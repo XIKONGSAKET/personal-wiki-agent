@@ -194,25 +194,25 @@ npm install -g @anthropic-ai/claude-code --ignore-scripts
 
 你的 Vault 创建后，AI 会按以下三层结构组织知识：
 
-`
+```
 MyWiki/
-├── raw/                     ← 原始资料层
-│   ├── unprocessed/         ← 放新资料（PDF、网页剪藏等）
-│   ├── processed/           ← 已处理的资料
-│   └── index.md             ← 处理状态记录
-├── wiki/                    ← 知识沉淀层
-│   ├── sources/             ← 单篇来源摘要
-│   ├── entities/            ← 人物、组织、实体
-│   ├── concepts/            ← 概念、方法、术语
-│   ├── synthesis/           ← 综合结论、对比分析
-│   └── index.md             ← 内容索引
-└── CLAUDE.md                ← AI 的工作规则
-`
+    raw/              原始资料层
+        unprocessed/  放新资料（PDF、网页剪藏等）
+        processed/    已处理的资料
+        index.md      处理状态记录
+    wiki/             知识沉淀层
+        sources/      单篇来源摘要
+        entities/     人物、组织、实体
+        concepts/     概念、方法、术语
+        synthesis/    综合结论、对比分析
+        index.md      内容索引
+    CLAUDE.md         AI 的工作规则
+```
 
 ### 你的日常工作流程
 
 **① 搜集资料**
-找到一篇好文章或 PDF，保存到 aw/unprocessed/ 文件夹。可以拖拽、复制粘贴，怎么方便怎么来。
+找到一篇好文章或 PDF，保存到 raw/unprocessed/ 文件夹。可以拖拽、复制粘贴，怎么方便怎么来。
 
 **② 让 AI 处理**
 在 Obsidian 中打开 Claudian 聊天窗口，告诉 AI：
@@ -231,7 +231,7 @@ AI 会基于已有的 wiki 综合回答。
 
 ### 几条红线（千万别做）
 
-- **不要私自删改 aw/ 里的原始资料** — 这些是事实来源，删了就没法追溯了
+- **不要私自删改 raw/ 里的原始资料** — 这些是事实来源，删了就没法追溯了
 - **不要私自重命名 wiki/ 目录结构** — AI 依赖路径定位页面
 - **不要在 wiki/ 里乱堆大段聊天记录** — 它会破坏知识结构
 - **不要在 AI 还没完成处理时关闭 Obsidian** — 可能导致资料丢失
