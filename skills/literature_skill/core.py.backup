@@ -1,0 +1,609 @@
+#!/usr/bin/env python3
+"""
+文献智能处理 Skill - 核心模块
+提供PDF分类、提取、分块功能
+"""
+
+import os
+import re
+import json
+import hashlib
+import requests
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass, field
+from enum import Enum
+import fitz  # PyMuPDF
+
+
+class PDFType(Enum):
+    """PDF文献类型"""
+    ACADEMIC = "academic"           # 学术论文
+    DISSERTATION = "dissertation"  # 学位论文
+    BOOK = "book"                   # 专著/书籍
+    POLICY = "policy"               # 政策文件
+    UNKNOWN = "unknown"             # 未知类型
+
+
+class PDFQuality(Enum):
+    """PDF质量评估"""
+    EXCELLENT = "excellent"  # 文本层完整
+    GOOD = "good"            # 可提取，需处理
+    POOR = "poor"            # 扫描件/OCR质量差
+    ENCRYPTED = "encrypted"  # 加密/无法读取
+    CNKI_GARBLED = "cnki_garbled"  # 知网乱码PDF
+
+
+@dataclass
+class PDFAnalysis:
+    """PDF分析结果"""
+    file_path: str
+    file_hash: str
+    pdf_type: PDFType
+    quality: PDFQuality
+    page_count: int = 0
+    has_text_layer: bool = False
+    is_encrypted: bool = False
+    is_columar: bool = False
+    column_count: int = 1
+    metadata: Dict = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class Heading:
+    """文档标题结构"""
+    level: int
+    title: str
+    page: int
+    bbox: Tuple[float, float, float, float]
+    font_size: float
+    is_bold: bool
+
+
+@dataclass
+class DocumentChunk:
+    """文档分块"""
+    chunk_id: str
+    heading: Optional[Heading]
+    content: str
+    start_page: int
+    end_page: int
+    word_count: int
+
+
+class PDFClassifier:
+    """PDF文献分类器"""
+
+    # 学位论文特征 (使用Unicode转义)
+    DISSERTATION_PATTERNS = [
+        r"硕[士学]学位?论文",  # 硕[士学]学位?论文
+        r"博[士学]学位?论文",  # 博[士学]学位?论文
+        r"硕士学位论文",  # 硕士学位论文
+        r"博士学位论文",  # 博士学位论文
+        r"学位论文",  # 学位论文
+        r"DOCTORAL?\s*DISSERTATION",
+        r"MASTER'?S?\s*THESIS",
+        r"Dissertation",
+        r"Thesis",
+        r"研究生",  # 研究生
+        r"毕业论文",  # 毕业论文
+        r"答辩",  # 答辩
+        r"指导教师",  # 指导教师
+        r"导师",  # 导师
+    ]
+
+    # 政策文件特征
+    POLICY_PATTERNS = [
+        r"国发\\s*\\[",
+        r"国办发\\s*\\[",
+        r"建城\\s*\\[",
+        r"建规\\s*\\[",
+        r".*\\d{4}.*号",
+        r"国务院",
+        r"住房和城乡建设部",
+        r"通知",
+        r"意见",
+        r"办法",
+        r"规定",
+        r"条例",
+        r"^\\s*第.*章",
+    ]
+
+    # 书籍特征
+    BOOK_PATTERNS = [
+        r"出版社",
+        r"ISBN",
+        r"版次",
+        r"印刷",
+        r"定价",
+        r"编[著译]$",
+        r"主编",
+        r"副主编",
+        r"丛书",
+        r"Chapter\\s+\\d+",
+        r"第[一二三四五六七八九十\\d]+章",
+    ]
+
+    @classmethod
+    def classify(cls, text_sample: str, metadata: Dict) -> PDFType:
+        """分类PDF类型"""
+        text_upper = text_sample.upper()
+
+        # 检查学位论文特征
+        dissertation_score = sum(1 for p in cls.DISSERTATION_PATTERNS
+                                   if re.search(p, text_sample, re.I))
+
+        # 检查政策文件特征
+        policy_score = sum(1 for p in cls.POLICY_PATTERNS
+                           if re.search(p, text_sample, re.I))
+
+        # 检查书籍特征
+        book_score = sum(1 for p in cls.BOOK_PATTERNS
+                         if re.search(p, text_sample, re.I))
+
+        # 学术论文默认特征
+        academic_indicators = [
+            r"Abstract",
+            r"摘要",
+            r"Keywords?",
+            r"关键词",
+            r"Introduction",
+            r"引言",
+            r"参考文献",
+            r"References",
+            r"\\d+\\s*\\.\\s*引言",
+        ]
+        academic_score = sum(1 for p in academic_indicators
+                             if re.search(p, text_sample, re.I))
+
+        scores = {
+            PDFType.DISSERTATION: dissertation_score * 2,
+            PDFType.POLICY: policy_score * 2,
+            PDFType.BOOK: book_score * 1.5,
+            PDFType.ACADEMIC: academic_score,
+        }
+
+        max_type = max(scores, key=scores.get)
+        return max_type if scores[max_type] >= 2 else PDFType.UNKNOWN
+
+
+class PDFQualityChecker:
+    """PDF质量检测器"""
+
+    @staticmethod
+    def check_quality(doc: fitz.Document, sample_text: str) -> Tuple[PDFQuality, List[str]]:
+        """检测PDF质量"""
+        warnings = []
+
+        # 检查加密
+        if doc.is_encrypted:
+            return PDFQuality.ENCRYPTED, ["PDF已加密，需要密码"]
+
+        # 检查是否CNKI乱码PDF
+        if PDFQualityChecker._is_cnki_garbled(sample_text):
+            return PDFQuality.CNKI_GARBLED, ["检测到知网乱码PDF，需要人工处理"]
+
+        # 检查文本层
+        total_chars = len(sample_text)
+        chinese_chars = len(re.findall(r'[\\u4e00-\\u9fff]', sample_text))
+        english_words = len(re.findall(r'[a-zA-Z]{3,}', sample_text))
+
+        if total_chars < 100:
+            warnings.append("文本层几乎为空，可能是扫描件")
+            return PDFQuality.POOR, warnings
+
+        # 检查乱码比例
+        garbled = PDFQualityChecker._count_garbled(sample_text[:1000])
+        if garbled > 0.3:
+            warnings.append(f"乱码比例过高 ({garbled:.1%})")
+            return PDFQuality.POOR, warnings
+
+        # 评估质量
+        if garbled < 0.05 and (chinese_chars + english_words * 3) > total_chars * 0.5:
+            return PDFQuality.EXCELLENT, warnings
+
+        return PDFQuality.GOOD, warnings
+
+    @staticmethod
+    def _is_cnki_garbled(text: str) -> bool:
+        """检测知网乱码特征"""
+        # CNKI乱码通常有以下特征：
+        # 1. 大量Unicode替换字符
+        # 2. 字符集中在特定私用区
+        # 3. 有效文本比例极低
+
+        if not text:
+            return False
+
+        # 检查替换字符
+        replacement_count = text.count('\\ufffd')
+        if replacement_count > 10:
+            return True
+
+        # 检查私用区字符
+        private_use = len(re.findall(r'[\\ue000-\\uf8ff]', text))
+        if private_use > 50:
+            return True
+
+        # 检查有效字符比例
+        valid_pattern = r'[\\u4e00-\\u9fff\\u3000-\\u303fa-zA-Z0-9\\s.,;:!?\\-]'
+        valid_chars = len(re.findall(valid_pattern, text))
+        total_chars = len(text)
+
+        if total_chars > 0 and valid_chars / total_chars < 0.1:
+            return True
+
+        return False
+
+    @staticmethod
+    def _count_garbled(text: str) -> float:
+        """计算乱码比例"""
+        if not text:
+            return 0.0
+
+        # 控制字符和异常字符
+        control_chars = len(re.findall(r'[\\x00-\\x08\\x0b-\\x0c\\x0e-\\x1f]', text))
+        return control_chars / len(text) if text else 0.0
+
+
+class ColumnDetector:
+    """多栏布局检测器"""
+
+    @staticmethod
+    def detect_columns(page: fitz.Page) -> Tuple[bool, int]:
+        """检测页面是否为多栏布局"""
+        blocks = page.get_text("blocks")
+        if len(blocks) < 4:
+            return False, 1
+
+        # 按y坐标分组
+        y_groups = {}
+        for block in blocks:
+            x0, y0, x1, y1, text = block[:5]
+            if not text.strip():
+                continue
+            y_key = int(y0 / 20) * 20  # 20像素为一组
+            if y_key not in y_groups:
+                y_groups[y_key] = []
+            y_groups[y_key].append((x0, x1))
+
+        # 检查同一y坐标是否有多个文本块
+        multi_column_rows = 0
+        for y, x_ranges in y_groups.items():
+            if len(x_ranges) >= 2:
+                # 检查是否形成明显的列
+                x_ranges.sort()
+                gaps = [x_ranges[i+1][0] - x_ranges[i][1]
+                        for i in range(len(x_ranges)-1)]
+                if gaps and min(gaps) > 50:  # 列间距大于50点
+                    multi_column_rows += 1
+
+        is_columar = multi_column_rows > len(y_groups) * 0.3
+
+        # 估算列数
+        column_count = 1
+        if is_columar:
+            avg_blocks = sum(len(x) for x in y_groups.values()) / len(y_groups) if y_groups else 1
+            column_count = max(2, int(avg_blocks))
+
+        return is_columar, column_count
+
+    @staticmethod
+    def reconstruct_reading_order(page: fitz.Page, column_count: int) -> str:
+        """重建阅读顺序"""
+        blocks = page.get_text("blocks")
+
+        # 按列分组
+        page_width = page.rect.width
+        col_width = page_width / column_count
+
+        column_blocks = [[] for _ in range(column_count)]
+        for block in blocks:
+            x0 = block[0]
+            col_idx = min(int(x0 / col_width), column_count - 1)
+            column_blocks[col_idx].append(block)
+
+        # 按列读取，每列内按y排序
+        text_parts = []
+        for col_blocks in column_blocks:
+            col_blocks.sort(key=lambda b: b[1])  # 按y排序
+            for block in col_blocks:
+                text_parts.append(block[4])  # text是第5个元素
+
+        return '\\n'.join(text_parts)
+
+
+class HeadingExtractor:
+    """标题提取器"""
+
+    # 中文标题模式
+    CN_HEADING_PATTERNS = [
+        (1, r'^[\\s]*第[一二三四五六七八九十\\d]+章[\\s]+.+'),  # 第一章 XXX
+        (1, r'^[\\s]*第\\d+章[\\s]+.+'),  # 第1章 XXX
+        (2, r'^[\\s]*\\d+\\.\\d+[\\s]+[^.]+'),  # 1.1 XXX
+        (2, r'^[\\s]*\\d+\\.[\\s]+[^.]+'),  # 1. XXX
+        (3, r'^[\\s]*\\d+\\.\\d+\\.\\d+[\\s]+.+'),  # 1.1.1 XXX
+        (2, r'^[\\s]*\\([\\d]+\\)[\\s]+[^)]+'),  # (1) XXX
+        (2, r'^[\\s]*（[\\d]+）[\\s]+[^)]+'),  # （1）XXX
+    ]
+
+    # 英文标题模式
+    EN_HEADING_PATTERNS = [
+        (1, r'^[\\s]*Chapter\\s+\\d+[\\s]*[:\\-\\.]?[\\s]*.+', re.I),
+        (1, r'^[\\s]*\\d+[\\s]+[A-Z][^a-z]{2,}', re.I),  # 1 INTRODUCTION
+        (2, r'^[\\s]*\\d+\\.\\d+[\\s]+[A-Z][a-z]+', re.I),  # 1.1 Method
+        (3, r'^[\\s]*\\d+\\.\\d+\\.\\d+[\\s]+[A-Z]', re.I),  # 1.1.1 Subsection
+    ]
+
+    def __init__(self):
+        self.font_size_threshold = 2.0  # 字号差异阈值
+        self.min_heading_size = 12.0
+
+    def extract_headings(self, doc: fitz.Document, max_pages: int = 10) -> List[Heading]:
+        """提取文档标题结构"""
+        headings = []
+
+        for page_num in range(min(max_pages, len(doc))):
+            page = doc[page_num]
+            page_headings = self._extract_page_headings(page, page_num + 1)
+            headings.extend(page_headings)
+
+        # 去重和排序
+        headings = self._deduplicate_headings(headings)
+        return headings
+
+    def _extract_page_headings(self, page: fitz.Page, page_num: int) -> List[Heading]:
+        """从单页提取标题"""
+        headings = []
+        blocks = page.get_text("dict")["blocks"]
+
+        for block in blocks:
+            if "lines" not in block:
+                continue
+
+            for line in block["lines"]:
+                for span in line["spans"]:
+                    text = span["text"].strip()
+                    if not text or len(text) > 100:
+                        continue
+
+                    font_size = span.get("size", 11)
+                    flags = span.get("flags", 0)
+                    is_bold = bool(flags & 2 ** 4) or bool(flags & 2 ** 5)
+
+                    # 基于样式判断
+                    level = self._detect_heading_level(text, font_size, is_bold)
+                    if level > 0:
+                        bbox = span.get("bbox", (0, 0, 0, 0))
+                        headings.append(Heading(
+                            level=level,
+                            title=text,
+                            page=page_num,
+                            bbox=bbox,
+                            font_size=font_size,
+                            is_bold=is_bold
+                        ))
+
+        return headings
+
+    def _detect_heading_level(self, text: str, font_size: float, is_bold: bool) -> int:
+        """检测标题级别"""
+        # 基于模式匹配
+        for level, pattern, *flags in self.CN_HEADING_PATTERNS:
+            if re.match(pattern, text, flags[0] if flags else 0):
+                return level
+
+        for level, pattern, *flags in self.EN_HEADING_PATTERNS:
+            if re.match(pattern, text, flags[0] if flags else 0):
+                return level
+
+        # 基于样式的启发式判断
+        if font_size >= 16 or (is_bold and font_size >= 14):
+            return 1
+        elif font_size >= 14 or (is_bold and font_size >= 12):
+            return 2
+        elif is_bold and font_size >= self.min_heading_size:
+            return 3
+
+        return 0
+
+    def _deduplicate_headings(self, headings: List[Heading]) -> List[Heading]:
+        """去重标题"""
+        seen = set()
+        result = []
+
+        for h in headings:
+            key = (h.title, h.page)
+            if key not in seen:
+                seen.add(key)
+                result.append(h)
+
+        return sorted(result, key=lambda x: (x.page, x.bbox[1]))
+
+
+class GrobidExtractor:
+    """Grobid API提取器"""
+
+    def __init__(self, base_url: str = "http://127.0.0.1:8070"):
+        self.base_url = base_url.rstrip('/')
+
+    def is_available(self) -> bool:
+        """检查Grobid是否可用"""
+        try:
+            response = requests.get(f"{self.base_url}/api/isalive", timeout=5)
+            return response.status_code == 200 and response.text.strip() == "true"
+        except:
+            return False
+
+    def extract(self, pdf_path: str) -> Optional[Dict]:
+        """使用Grobid提取结构化信息"""
+        if not self.is_available():
+            return None
+
+        try:
+            with open(pdf_path, 'rb') as f:
+                files = {'input': f}
+                response = requests.post(
+                    f"{self.base_url}/api/processFulltextDocument",
+                    files=files,
+                    timeout=120
+                )
+
+            if response.status_code == 200:
+                # Grobid返回TEI XML
+                return self._parse_tei(response.text)
+            else:
+                return {"error": f"Grobid returned {response.status_code}"}
+
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _parse_tei(self, tei_xml: str) -> Dict:
+        """解析TEI XML为结构化数据"""
+        # 简化解析，实际需要xml.etree.ElementTree
+        result = {
+            "title": self._extract_tag(tei_xml, "title"),
+            "abstract": self._extract_tag(tei_xml, "abstract"),
+            "body": self._extract_body(tei_xml),
+            "sections": self._extract_sections(tei_xml),
+        }
+        return result
+
+    def _extract_tag(self, xml: str, tag: str) -> str:
+        """提取XML标签内容"""
+        pattern = f'<{tag}[^>]*>(.*?)</{tag}>'
+        match = re.search(pattern, xml, re.DOTALL | re.I)
+        return re.sub(r'<[^>]+>', '', match.group(1)) if match else ""
+
+    def _extract_body(self, xml: str) -> str:
+        """提取正文"""
+        match = re.search(r'<body[^>]*>(.*?)</body>', xml, re.DOTALL | re.I)
+        return re.sub(r'<[^>]+>', ' ', match.group(1)).strip() if match else ""
+
+    def _extract_sections(self, xml: str) -> List[Dict]:
+        """提取章节结构"""
+        sections = []
+        pattern = r'<div[^>]*>.*?<head[^>]*>(.*?)</head>.*?</div>'
+        for match in re.finditer(pattern, xml, re.DOTALL | re.I):
+            title = re.sub(r'<[^>]+>', '', match.group(1))
+            sections.append({"title": title, "level": 1})
+        return sections
+
+
+class DocumentChunker:
+    """文档分块器 - 按标题分块"""
+
+    def __init__(self, max_chunk_size: int = 5000, overlap: int = 200):
+        self.max_chunk_size = max_chunk_size
+        self.overlap = overlap
+
+    def chunk_by_headings(self, text: str, headings: List[Heading]) -> List[DocumentChunk]:
+        """按标题分块"""
+        chunks = []
+
+        if not headings:
+            # 无标题时使用大段落分块
+            return self._chunk_by_paragraphs(text)
+
+        # 按标题位置分块
+        lines = text.split('\\n')
+        current_heading_idx = 0
+        current_content = []
+        chunk_id = 0
+
+        for i, line in enumerate(lines):
+            # 检查是否是标题行
+            is_heading = False
+            for h in headings:
+                if h.title in line or line.strip() == h.title.strip():
+                    # 保存前一个块
+                    if current_content:
+                        content = '\\n'.join(current_content)
+                        chunks.append(self._create_chunk(
+                            str(chunk_id),
+                            headings[current_heading_idx] if current_heading_idx < len(headings) else None,
+                            content,
+                            headings
+                        ))
+                        chunk_id += 1
+                        current_content = []
+
+                    current_heading_idx = headings.index(h)
+                    is_heading = True
+                    break
+
+            if not is_heading:
+                current_content.append(line)
+
+        # 保存最后一个块
+        if current_content:
+            content = '\\n'.join(current_content)
+            chunks.append(self._create_chunk(
+                str(chunk_id),
+                headings[-1] if headings else None,
+                content,
+                headings
+            ))
+
+        return chunks
+
+    def _create_chunk(self, chunk_id: str, heading: Optional[Heading],
+                      content: str, all_headings: List[Heading]) -> DocumentChunk:
+        """创建文档块"""
+        # 查找起始和结束页
+        start_page = heading.page if heading else 1
+        end_page = start_page
+
+        for h in all_headings:
+            if h.title in content:
+                end_page = max(end_page, h.page)
+
+        return DocumentChunk(
+            chunk_id=chunk_id,
+            heading=heading,
+            content=content.strip(),
+            start_page=start_page,
+            end_page=end_page,
+            word_count=len(content)
+        )
+
+    def _chunk_by_paragraphs(self, text: str) -> List[DocumentChunk]:
+        """按段落分块（无标题时的后备方案）"""
+        paragraphs = [p.strip() for p in text.split('\\n\\n') if p.strip()]
+        chunks = []
+
+        current_content = []
+        current_size = 0
+        chunk_id = 0
+
+        for para in paragraphs:
+            if current_size + len(para) > self.max_chunk_size and current_content:
+                chunks.append(DocumentChunk(
+                    chunk_id=str(chunk_id),
+                    heading=None,
+                    content='\\n\\n'.join(current_content),
+                    start_page=1,
+                    end_page=1,
+                    word_count=sum(len(p) for p in current_content)
+                ))
+                # 保留重叠
+                current_content = current_content[-2:] if len(current_content) > 2 else []
+                current_size = sum(len(p) for p in current_content)
+                chunk_id += 1
+
+            current_content.append(para)
+            current_size += len(para)
+
+        # 最后一个块
+        if current_content:
+            chunks.append(DocumentChunk(
+                chunk_id=str(chunk_id),
+                heading=None,
+                content='\\n\\n'.join(current_content),
+                start_page=1,
+                end_page=1,
+                word_count=sum(len(p) for p in current_content)
+            ))
+
+        return chunks

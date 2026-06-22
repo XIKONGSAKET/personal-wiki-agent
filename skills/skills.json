@@ -1,0 +1,201 @@
+﻿{
+    "count":  49,
+    "skills":  [
+                   {
+                       "name":  "academic-writing-assistant",
+                       "path":  "skills/academic-writing-assistant"
+                   },
+                   {
+                       "name":  "algorithmic-art",
+                       "path":  "skills/algorithmic-art"
+                   },
+                   {
+                       "name":  "anysearch",
+                       "path":  "skills/anysearch"
+                   },
+                   {
+                       "name":  "arxiv-conf-papers",
+                       "path":  "skills/arxiv-conf-papers"
+                   },
+                   {
+                       "name":  "arxiv-extract-paper-images",
+                       "path":  "skills/arxiv-extract-paper-images"
+                   },
+                   {
+                       "name":  "arxiv-paper-analyze",
+                       "path":  "skills/arxiv-paper-analyze"
+                   },
+                   {
+                       "name":  "arxiv-paper-search",
+                       "path":  "skills/arxiv-paper-search"
+                   },
+                   {
+                       "name":  "arxiv-start-my-day",
+                       "path":  "skills/arxiv-start-my-day"
+                   },
+                   {
+                       "name":  "brainstorming",
+                       "path":  "skills/brainstorming"
+                   },
+                   {
+                       "name":  "brand-guidelines",
+                       "path":  "skills/brand-guidelines"
+                   },
+                   {
+                       "name":  "canvas-design",
+                       "path":  "skills/canvas-design"
+                   },
+                   {
+                       "name":  "claude-api",
+                       "path":  "skills/claude-api"
+                   },
+                   {
+                       "name":  "cnki-advanced-search",
+                       "path":  "skills/cnki-advanced-search"
+                   },
+                   {
+                       "name":  "cnki-download",
+                       "path":  "skills/cnki-download"
+                   },
+                   {
+                       "name":  "cnki-export",
+                       "path":  "skills/cnki-export"
+                   },
+                   {
+                       "name":  "cnki-journal-index",
+                       "path":  "skills/cnki-journal-index"
+                   },
+                   {
+                       "name":  "cnki-journal-search",
+                       "path":  "skills/cnki-journal-search"
+                   },
+                   {
+                       "name":  "cnki-journal-toc",
+                       "path":  "skills/cnki-journal-toc"
+                   },
+                   {
+                       "name":  "cnki-navigate-pages",
+                       "path":  "skills/cnki-navigate-pages"
+                   },
+                   {
+                       "name":  "cnki-paper-detail",
+                       "path":  "skills/cnki-paper-detail"
+                   },
+                   {
+                       "name":  "cnki-parse-results",
+                       "path":  "skills/cnki-parse-results"
+                   },
+                   {
+                       "name":  "cnki-search",
+                       "path":  "skills/cnki-search"
+                   },
+                   {
+                       "name":  "defuddle",
+                       "path":  "skills/defuddle"
+                   },
+                   {
+                       "name":  "doc-coauthoring",
+                       "path":  "skills/doc-coauthoring"
+                   },
+                   {
+                       "name":  "docx",
+                       "path":  "skills/docx"
+                   },
+                   {
+                       "name":  "frontend-design",
+                       "path":  "skills/frontend-design"
+                   },
+                   {
+                       "name":  "humanizer",
+                       "path":  "skills/humanizer"
+                   },
+                   {
+                       "name":  "ideation",
+                       "path":  "skills/ideation"
+                   },
+                   {
+                       "name":  "internal-comms",
+                       "path":  "skills/internal-comms"
+                   },
+                   {
+                       "name":  "json-canvas",
+                       "path":  "skills/json-canvas"
+                   },
+                   {
+                       "name":  "literature_skill",
+                       "path":  "skills/literature_skill"
+                   },
+                   {
+                       "name":  "mcp-builder",
+                       "path":  "skills/mcp-builder"
+                   },
+                   {
+                       "name":  "md-to-word",
+                       "path":  "skills/md-to-word"
+                   },
+                   {
+                       "name":  "nuwa",
+                       "path":  "skills/nuwa"
+                   },
+                   {
+                       "name":  "obsidian-bases",
+                       "path":  "skills/obsidian-bases"
+                   },
+                   {
+                       "name":  "obsidian-cli",
+                       "path":  "skills/obsidian-cli"
+                   },
+                   {
+                       "name":  "obsidian-markdown",
+                       "path":  "skills/obsidian-markdown"
+                   },
+                   {
+                       "name":  "paper_memory_manager",
+                       "path":  "skills/paper_memory_manager"
+                   },
+                   {
+                       "name":  "pdf",
+                       "path":  "skills/pdf"
+                   },
+                   {
+                       "name":  "pptx",
+                       "path":  "skills/pptx"
+                   },
+                   {
+                       "name":  "research-paper-writing",
+                       "path":  "skills/research-paper-writing"
+                   },
+                   {
+                       "name":  "skill-creator",
+                       "path":  "skills/skill-creator"
+                   },
+                   {
+                       "name":  "slack-gif-creator",
+                       "path":  "skills/slack-gif-creator"
+                   },
+                   {
+                       "name":  "sun-yimin-perspective",
+                       "path":  "skills/sun-yimin-perspective"
+                   },
+                   {
+                       "name":  "tavily-search",
+                       "path":  "skills/tavily-search"
+                   },
+                   {
+                       "name":  "theme-factory",
+                       "path":  "skills/theme-factory"
+                   },
+                   {
+                       "name":  "web-artifacts-builder",
+                       "path":  "skills/web-artifacts-builder"
+                   },
+                   {
+                       "name":  "webapp-testing",
+                       "path":  "skills/webapp-testing"
+                   },
+                   {
+                       "name":  "xlsx",
+                       "path":  "skills/xlsx"
+                   }
+               ]
+}

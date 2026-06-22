@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""
+文献智能处理 Skill - 主处理器
+整合分类、质量检测、提取、分块功能
+"""
+
+import os
+import sys
+import json
+import hashlib
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
+
+# 导入核心模块
+from core import (
+    PDFType, PDFQuality, PDFAnalysis, Heading, DocumentChunk,
+    PDFClassifier, PDFQualityChecker, ColumnDetector, HeadingExtractor,
+    GrobidExtractor, DocumentChunker
+)
+
+import fitz  # PyMuPDF
+
+
+class LiteratureProcessor:
+    """文献处理器主类"""
+
+    def __init__(self, output_dir: str = "./processed", grobid_url: str = "http://127.0.0.1:8070"):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.grobid = GrobidExtractor(grobid_url)
+        self.heading_extractor = HeadingExtractor()
+        self.chunker = DocumentChunker()
+
+    def process(self, pdf_path: str, force: bool = False) -> Dict:
+        """
+        处理PDF文献
+
+        Args:
+            pdf_path: PDF文件路径
+            force: 强制重新处理
+
+        Returns:
+            处理结果字典
+        """
+        pdf_path = Path(pdf_path)
+        if not pdf_path.exists():
+            return {"error": f"文件不存在: {pdf_path}"}
+
+        # 计算文件哈希
+        file_hash = self._compute_hash(pdf_path)
+
+        # 检查缓存
+        cache_file = self.output_dir / f"{file_hash}.json"
+        if cache_file.exists() and not force:
+            print(f"[INFO] 使用缓存: {cache_file}")
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+
+        # 1. 分析PDF
+        analysis = self._analyze_pdf(pdf_path)
+
+        # 检查是否需要人工干预
+        if analysis.quality in [PDFQuality.ENCRYPTED, PDFQuality.CNKI_GARBLED]:
+            return self._create_intervention_request(analysis)
+
+        # 2. 提取文本
+        extraction = self._extract_text(pdf_path, analysis)
+
+        # 3. 分块
+        chunks = self._chunk_document(extraction, analysis)
+
+        # 4. 生成输出
+        result = {
+            "meta": {
+                "file": str(pdf_path),
+                "file_hash": file_hash,
+                "processed_at": datetime.now().isoformat(),
+                "processor_version": "1.0.0"
+            },
+            "analysis": {
+                "pdf_type": analysis.pdf_type.value,
+                "quality": analysis.quality.value,
+                "page_count": analysis.page_count,
+                "has_text_layer": analysis.has_text_layer,
+                "is_columar": analysis.is_columar,
+                "column_count": analysis.column_count,
+                "warnings": analysis.warnings
+            },
+            "metadata": extraction.get("metadata", {}),
+            "headings": [{
+                "level": h.level,
+                "title": h.title,
+                "page": h.page
+            } for h in extraction.get("headings", [])],
+            "chunks": [{
+                "id": c.chunk_id,
+                "title": c.heading.title if c.heading else f"块 {c.chunk_id}",
+                "content": c.content,
+                "pages": f"{c.start_page}-{c.end_page}",
+                "word_count": c.word_count
+            } for c in chunks]
+        }
+
+        # 保存结果
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
+        # 生成Markdown文件
+        self._generate_markdown(result, pdf_path)
+
+        return result
+
+    def _analyze_pdf(self, pdf_path: Path) -> PDFAnalysis:
+        """分析PDF文件"""
+        doc = fitz.open(pdf_path)
+
+        # 提取样本文本
+        sample_pages = min(3, len(doc))
+        sample_text = ""
+        for i in range(sample_pages):
+            sample_text += doc[i].get_text()
+
+        # 检测类型
+        pdf_type = PDFClassifier.classify(sample_text, doc.metadata)
+
+        # 检测质量
+        quality, warnings = PDFQualityChecker.check_quality(doc, sample_text)
+
+        # 检测多栏
+        is_columar, column_count = False, 1
+        if len(doc) > 0:
+            is_columar, column_count = ColumnDetector.detect_columns(doc[0])
+
+        # 检查是否有文本层
+        has_text = len(sample_text.strip()) > 50
+
+        # 在关闭前获取所有需要的属性
+        page_count = len(doc)
+        is_encrypted = doc.is_encrypted
+        metadata = dict(doc.metadata)
+
+        doc.close()
+
+        return PDFAnalysis(
+            file_path=str(pdf_path),
+            file_hash=self._compute_hash(pdf_path),
+            pdf_type=pdf_type,
+            quality=quality,
+            page_count=page_count,
+            has_text_layer=has_text,
+            is_encrypted=is_encrypted,
+            is_columar=is_columar,
+            column_count=column_count,
+            metadata=metadata,
+            warnings=warnings
+        )
+
+    def _extract_text(self, pdf_path: Path, analysis: PDFAnalysis) -> Dict:
+        """提取PDF文本 - 多引擎策略"""
+        result = {"text": "", "headings": [], "metadata": {}}
+
+        # 策略1: Grobid (学术论文首选)
+        if analysis.pdf_type == PDFType.ACADEMIC and self.grobid.is_available():
+            print("[INFO] 使用Grobid提取...")
+            grobid_result = self.grobid.extract(str(pdf_path))
+            if grobid_result and "error" not in grobid_result:
+                result["text"] = grobid_result.get("body", "")
+                result["metadata"] = {
+                    "title": grobid_result.get("title", ""),
+                    "abstract": grobid_result.get("abstract", ""),
+                    "source": "grobid"
+                }
+                # 从Grobid结果重建headings
+                if grobid_result.get("sections"):
+                    result["headings"] = [
+                        Heading(level=s.get("level", 1), title=s["title"],
+                               page=0, bbox=(0, 0, 0, 0), font_size=12, is_bold=False)
+                        for s in grobid_result["sections"]
+                    ]
+
+        # 策略2: PyMuPDF (通用)
+        if not result["text"]:
+            print("[INFO] 使用PyMuPDF提取...")
+            result = self._extract_with_pymupdf(pdf_path, analysis)
+
+        return result
+
+    def _extract_with_pymupdf(self, pdf_path: Path, analysis: PDFAnalysis) -> Dict:
+        """使用PyMuPDF提取文本"""
+        doc = fitz.open(pdf_path)
+        text_parts = []
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+
+            if analysis.is_columar:
+                # 多栏布局重建
+                text = ColumnDetector.reconstruct_reading_order(
+                    page, analysis.column_count
+                )
+            else:
+                text = page.get_text()
+
+            text_parts.append(f"\n<!-- Page {page_num + 1} -->\n")
+            text_parts.append(text)
+
+        full_text = "\n".join(text_parts)
+
+        # 提取标题
+        headings = self.heading_extractor.extract_headings(doc)
+
+        doc.close()
+
+        return {
+            "text": full_text,
+            "headings": headings,
+            "metadata": {"source": "pymupdf"}
+        }
+
+    def _chunk_document(self, extraction: Dict, analysis: PDFAnalysis) -> List[DocumentChunk]:
+        """按标题分块文档"""
+        text = extraction.get("text", "")
+        headings = extraction.get("headings", [])
+
+        print(f"[INFO] 检测到 {len(headings)} 个标题，开始分块...")
+
+        chunks = self.chunker.chunk_by_headings(text, headings)
+
+        return chunks
+
+    def _generate_markdown(self, result: Dict, pdf_path: Path):
+        """生成Markdown输出文件"""
+        output_name = pdf_path.stem + "_processed.md"
+        output_path = self.output_dir / output_name
+
+        lines = []
+
+        # 元信息
+        lines.append("---")
+        lines.append(f"title: {result.get('metadata', {}).get('title', pdf_path.stem)}")
+        lines.append(f"source: {pdf_path}")
+        lines.append(f"processed_at: {result['meta']['processed_at']}")
+        lines.append(f"pdf_type: {result['analysis']['pdf_type']}")
+        lines.append(f"quality: {result['analysis']['quality']}")
+        lines.append(f"page_count: {result['analysis']['page_count']}")
+        lines.append("---")
+        lines.append("")
+
+        # 警告
+        if result['analysis']['warnings']:
+            lines.append("## 处理警告")
+            for w in result['analysis']['warnings']:
+                lines.append(f"- {w}")
+            lines.append("")
+
+        # 摘要
+        abstract = result.get('metadata', {}).get('abstract', '')
+        if abstract:
+            lines.append("## 摘要")
+            lines.append(abstract)
+            lines.append("")
+
+        # 目录
+        if result['headings']:
+            lines.append("## 目录")
+            for h in result['headings'][:20]:  # 最多20个
+                indent = "  " * (h['level'] - 1)
+                lines.append(f"{indent}- {h['title']}")
+            lines.append("")
+
+        # 内容块
+        lines.append("## 正文")
+        lines.append("")
+
+        for chunk in result['chunks']:
+            lines.append(f"### {chunk['title']}")
+            lines.append(f"*页码: {chunk['pages']} | 字数: {chunk['word_count']}*")
+            lines.append("")
+            lines.append(chunk['content'])
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write("\n".join(lines))
+
+        print(f"[OK] Markdown已保存: {output_path}")
+
+    def _create_intervention_request(self, analysis: PDFAnalysis) -> Dict:
+        """创建人工干预请求"""
+        return {
+            "status": "requires_intervention",
+            "file": analysis.file_path,
+            "reason": analysis.quality.value,
+            "message": self._get_intervention_message(analysis.quality),
+            "suggestions": self._get_intervention_suggestions(analysis.quality)
+        }
+
+    def _get_intervention_message(self, quality: PDFQuality) -> str:
+        """获取干预消息"""
+        messages = {
+            PDFQuality.ENCRYPTED: "PDF已加密，无法自动处理。",
+            PDFQuality.CNKI_GARBLED: "检测到知网乱码PDF，需要人工转换。"
+        }
+        return messages.get(quality, "PDF需要人工处理。")
+
+    def _get_intervention_suggestions(self, quality: PDFQuality) -> List[str]:
+        """获取干预建议"""
+        if quality == PDFQuality.ENCRYPTED:
+            return [
+                "1. 使用PDF密码解除工具",
+                "2. 从原源重新下载未加密版本",
+                "3. 使用浏览器打印为PDF"
+            ]
+        elif quality == PDFQuality.CNKI_GARBLED:
+            return [
+                "1. 使用CAJViewer打开文件",
+                "2. 文件 → 另存为 → PDF",
+                "3. 或使用知网海外版直接下载PDF",
+                "4. 或使用Zotero + 茉莉花插件自动转换"
+            ]
+        return []
+
+    def _compute_hash(self, file_path: Path) -> str:
+        """计算文件哈希"""
+        hasher = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()[:16]
+
+
+def main():
+    """命令行入口"""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="文献智能处理 Skill - 多引擎PDF处理"
+    )
+    parser.add_argument("pdf", help="PDF文件路径")
+    parser.add_argument("-o", "--output", default="./processed",
+                       help="输出目录")
+    parser.add_argument("--grobid-url", default="http://127.0.0.1:8070",
+                       help="Grobid服务地址")
+    parser.add_argument("-f", "--force", action="store_true",
+                       help="强制重新处理")
+
+    args = parser.parse_args()
+
+    processor = LiteratureProcessor(
+        output_dir=args.output,
+        grobid_url=args.grobid_url
+    )
+
+    result = processor.process(args.pdf, force=args.force)
+
+    # 输出结果 (处理Windows编码问题)
+    import sys
+    if sys.platform == 'win32':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()
