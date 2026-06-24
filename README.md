@@ -112,6 +112,48 @@ npm install -g @anthropic-ai/claude-code --ignore-scripts
 
 ---
 
+
+### 第六步：安装 Claudian 插件（手动安装）
+
+Claudian 是让 AI 出现在 Obsidian 里的关键插件。**部署脚本不会自动安装它**，需要你手动安装。
+
+**方法一：从 Obsidian 插件市场安装（推荐）**
+1. 打开 Obsidian → 点击左下角齿轮图标（设置）
+2. 左侧选「第三方插件」
+3. 点「浏览」，搜索 **Claudian**
+4. 点「安装」，然后点「启用」
+5. 如果提示安全模式，先关闭再启用
+
+> 如果搜索不到（国内网络问题），请用方法二。
+
+**方法二：从 GitHub Release 手动安装**
+1. 打开 https://github.com/YishenTu/claudian/releases/latest
+2. 下载 main.js、manifest.json、styles.css 三个文件
+3. 在你的 Vault 目录下手动创建文件夹：.obsidian/plugins/claudian/
+4. 把下载的三个文件放进去
+5. 重启 Obsidian，在设置中启用
+
+---
+
+### 第七步：CC-Switch — 用本地 AI 代理来调试
+
+**CC-Switch**（从 https://github.com/farion1231/cc-switch 下载），用于快速切换 Claude Code CLI 的 API 配置。
+
+**什么时候用它：**
+- 安装部署过程中遇到错误，可以用 Claude Code CLI 在本地调试
+- 先用 CC-Switch 把 Claude Code CLI 切换到 DeepSeek
+- 然后直接运行 claude 命令，让 AI 帮你分析错误日志
+
+**使用方法：**
+1. 解压后双击 cc-switch.exe
+2. 界面中选择 DeepSeek
+3. 填入你的 DeepSeek API Key
+4. 保存后，打开命令行（cmd/PowerShell）
+5. 输入 claude 即可和本地 AI 代理对话
+
+> CC-Switch 只影响 Claude Code CLI，不影响 Obsidian 里的 Claudian 插件。
+
+---
 ## 🚀 开始配置
 
 ### 第六步：下载本项目的文件
